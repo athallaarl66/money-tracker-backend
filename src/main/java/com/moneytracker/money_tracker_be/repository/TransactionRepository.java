@@ -15,14 +15,13 @@ import java.util.Optional;
 @Repository
 public interface TransactionRepository extends JpaRepository<Transaction, Long> {
 
-    // ===== EXISTING - jangan diubah =====
+    // ===== EXISTING  =====
     List<Transaction> findByAccount(Account account);
     Optional<Transaction> findByIdAndAccount(Long id, Account account);
 
     // ===== ANALYTICS =====
 
-    // Karena transactionType adalah enum, kita pakai
-    // Transaction.TransactionType sebagai tipe parameter
+ 
     @Query("SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t " +
             "WHERE t.account.user.id = :userId AND t.transactionType = :type")
     BigDecimal sumByUserIdAndType(
@@ -56,8 +55,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             @Param("startDate") LocalDateTime startDate,
             @Param("endDate") LocalDateTime endDate);
 
-    // Monthly trend - native query karena butuh TO_CHAR (PostgreSQL function)
-    // Di native query, enum tersimpan sebagai plain string di DB
+    // Monthly trend - (PostgreSQL function)
     @Query(value =
             "SELECT TO_CHAR(t.transaction_date, 'YYYY-MM') as month, " +
                     "  SUM(CASE WHEN t.type = 'INCOME' THEN t.amount ELSE 0 END) as income, " +
