@@ -4,15 +4,15 @@ import com.moneytracker.money_tracker_be.dto.TransactionRequest;
 import com.moneytracker.money_tracker_be.dto.TransactionResponse;
 import com.moneytracker.money_tracker_be.entity.Account;
 import com.moneytracker.money_tracker_be.entity.Transaction;
+import com.moneytracker.money_tracker_be.entity.Transaction.TransactionType;
 import com.moneytracker.money_tracker_be.repository.AccountRepository;
 import com.moneytracker.money_tracker_be.repository.TransactionRepository;
 import com.moneytracker.money_tracker_be.repository.UserRepository;
-import com.moneytracker.money_tracker_be.entity.User;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -22,14 +22,13 @@ public class TransactionService {
     private final AccountRepository accountRepository;
     private final UserRepository userRepository;
 
-    // Validasi account milik user yang login
-    private Account getAccount(String username, Long accountId) {
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("User not found"));
-        return accountRepository.findByIdAndUser(accountId, user)
-                .orElseThrow(() -> new RuntimeException("Account not found"));
+    private Account getAccountOrThrow(String email, Long accountId) {
+        return accountRepository.findById(accountId)
+                .filter(a -> a.getUser().getEmail().equals(email))
+                .orElseThrow(() -> new RuntimeException("Account not found or unauthorized"));
     }
 
+    // Pakai .builder() karena TransactionResponse pakai @Builder (bukan @NoArgsConstructor)
     private TransactionResponse toResponse(Transaction t) {
         return TransactionResponse.builder()
                 .id(t.getId())
@@ -44,8 +43,27 @@ public class TransactionService {
                 .build();
     }
 
-    public TransactionResponse create(String username, Long accountId, TransactionRequest request) {
-        Account account = getAccount(username, accountId);
+    // Tambah efek ke balance (income = add, expense = subtract)
+    private void applyBalance(Account account, TransactionType type, BigDecimal amount) {
+        if (type == TransactionType.INCOME) {
+            account.setBalance(account.getBalance().add(amount));
+        } else {
+            account.setBalance(account.getBalance().subtract(amount));
+        }
+    }
+
+    // Balik efek ke balance (kebalikan dari applyBalance)
+    private void reverseBalance(Account account, TransactionType type, BigDecimal amount) {
+        if (type == TransactionType.INCOME) {
+            account.setBalance(account.getBalance().subtract(amount));
+        } else {
+            account.setBalance(account.getBalance().add(amount));
+        }
+    }
+
+    // CREATE
+    public TransactionResponse create(String email, Long accountId, TransactionRequest request) {
+        Account account = getAccountOrThrow(email, accountId);
 
         Transaction transaction = Transaction.builder()
                 .account(account)
@@ -56,79 +74,66 @@ public class TransactionService {
                 .transactionDate(request.getTransactionDate())
                 .build();
 
-        transactionRepository.save(transaction);
-
-        // INCOME → balance naik, EXPENSE → balance turun
-        if (request.getTransactionType().equals("INCOME")) {
-            account.setBalance(account.getBalance().add(request.getAmount()));
-        } else {
-            account.setBalance(account.getBalance().subtract(request.getAmount()));
-        }
+        applyBalance(account, request.getTransactionType(), request.getAmount());
         accountRepository.save(account);
-
-        return toResponse(transaction);
+        return toResponse(transactionRepository.save(transaction));
     }
 
-    public List<TransactionResponse> getAll(String username, Long accountId) {
-        Account account = getAccount(username, accountId);
-        return transactionRepository.findByAccount(account)
+    // GET ALL per account
+    public List<TransactionResponse> getAll(String email, Long accountId) {
+        getAccountOrThrow(email, accountId);
+        return transactionRepository.findByAccountId(accountId)
+                .stream().map(this::toResponse).toList();
+    }
+
+    // GET ALL lintas semua account milik user — endpoint baru GET /api/transactions
+    public List<TransactionResponse> getAllByUser(String email) {
+        Long userId = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found"))
+                .getId();
+
+        return transactionRepository.findByAccountUserId(userId)
                 .stream()
+                .sorted((a, b) -> b.getTransactionDate().compareTo(a.getTransactionDate()))
                 .map(this::toResponse)
-                .collect(Collectors.toList());
+                .toList();
     }
 
-    public TransactionResponse getById(String username, Long accountId, Long id) {
-        Account account = getAccount(username, accountId);
-        Transaction transaction = transactionRepository.findByIdAndAccount(id, account)
+    // GET BY ID
+    public TransactionResponse getById(String email, Long accountId, Long id) {
+        getAccountOrThrow(email, accountId);
+        Transaction t = transactionRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Transaction not found"));
-        return toResponse(transaction);
+        return toResponse(t);
     }
 
-    public TransactionResponse update(String username, Long accountId, Long id, TransactionRequest request) {
-        Account account = getAccount(username, accountId);
-        Transaction transaction = transactionRepository.findByIdAndAccount(id, account)
+    // UPDATE
+    public TransactionResponse update(String email, Long accountId, Long id, TransactionRequest request) {
+        Account account = getAccountOrThrow(email, accountId);
+        Transaction transaction = transactionRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Transaction not found"));
 
-        // Balik dulu efek transaksi lama ke balance
-        if (transaction.getTransactionType().equals("INCOME")) {
-            account.setBalance(account.getBalance().subtract(transaction.getAmount()));
-        } else {
-            account.setBalance(account.getBalance().add(transaction.getAmount()));
-        }
-
-        // Terapkan efek transaksi baru ke balance
-        if (request.getTransactionType().equals("INCOME")) {
-            account.setBalance(account.getBalance().add(request.getAmount()));
-        } else {
-            account.setBalance(account.getBalance().subtract(request.getAmount()));
-        }
+        reverseBalance(account, transaction.getTransactionType(), transaction.getAmount());
+        applyBalance(account, request.getTransactionType(), request.getAmount());
 
         transaction.setDescription(request.getDescription());
         transaction.setAmount(request.getAmount());
         transaction.setTransactionType(request.getTransactionType());
         transaction.setCategory(request.getCategory());
-        if (request.getTransactionDate() != null) {
-            transaction.setTransactionDate(request.getTransactionDate());
-        }
+        transaction.setTransactionDate(request.getTransactionDate());
 
         accountRepository.save(account);
         return toResponse(transactionRepository.save(transaction));
     }
 
-    public void delete(String username, Long accountId, Long id) {
-        Account account = getAccount(username, accountId);
-        Transaction transaction = transactionRepository.findByIdAndAccount(id, account)
+    // DELETE
+    public void delete(String email, Long accountId, Long id) {
+        Account account = getAccountOrThrow(email, accountId);
+        Transaction transaction = transactionRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Transaction not found"));
 
-        // Kembalikan balance sebelum hapus
-        // Kebalikan dari create: INCOME dihapus → balance turun, EXPENSE dihapus → balance naik
-        if (transaction.getTransactionType().equals("INCOME")) {
-            account.setBalance(account.getBalance().subtract(transaction.getAmount()));
-        } else {
-            account.setBalance(account.getBalance().add(transaction.getAmount()));
-        }
+        reverseBalance(account, transaction.getTransactionType(), transaction.getAmount());
         accountRepository.save(account);
-
         transactionRepository.delete(transaction);
     }
 }

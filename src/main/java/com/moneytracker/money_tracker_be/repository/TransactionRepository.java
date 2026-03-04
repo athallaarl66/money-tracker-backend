@@ -15,13 +15,16 @@ import java.util.Optional;
 @Repository
 public interface TransactionRepository extends JpaRepository<Transaction, Long> {
 
-    // ===== EXISTING  =====
+    // ===== EXISTING =====
     List<Transaction> findByAccount(Account account);
     Optional<Transaction> findByIdAndAccount(Long id, Account account);
 
+    // ===== NEW — dipakai TransactionService =====
+    List<Transaction> findByAccountId(Long accountId);
+    List<Transaction> findByAccountUserId(Long userId); // get all transaksi lintas account
+
     // ===== ANALYTICS =====
 
- 
     @Query("SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t " +
             "WHERE t.account.user.id = :userId AND t.transactionType = :type")
     BigDecimal sumByUserIdAndType(
@@ -37,14 +40,12 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             @Param("startDate") LocalDateTime startDate,
             @Param("endDate") LocalDateTime endDate);
 
-    // Expense by category - all time
     @Query("SELECT t.category, SUM(t.amount), COUNT(t) FROM Transaction t " +
             "WHERE t.account.user.id = :userId " +
             "AND t.transactionType = com.moneytracker.money_tracker_be.entity.Transaction.TransactionType.EXPENSE " +
             "GROUP BY t.category ORDER BY SUM(t.amount) DESC")
     List<Object[]> findExpenseByCategory(@Param("userId") Long userId);
 
-    // Expense by category - filtered by date range
     @Query("SELECT t.category, SUM(t.amount), COUNT(t) FROM Transaction t " +
             "WHERE t.account.user.id = :userId " +
             "AND t.transactionType = com.moneytracker.money_tracker_be.entity.Transaction.TransactionType.EXPENSE " +
@@ -55,7 +56,6 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             @Param("startDate") LocalDateTime startDate,
             @Param("endDate") LocalDateTime endDate);
 
-    // Monthly trend - (PostgreSQL function)
     @Query(value =
             "SELECT TO_CHAR(t.transaction_date, 'YYYY-MM') as month, " +
                     "  SUM(CASE WHEN t.type = 'INCOME' THEN t.amount ELSE 0 END) as income, " +
@@ -67,16 +67,13 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
                     "GROUP BY TO_CHAR(t.transaction_date, 'YYYY-MM') " +
                     "ORDER BY month ASC",
             nativeQuery = true)
-
     List<Object[]> findMonthlyTrend(
             @Param("userId") Long userId,
             @Param("startDate") LocalDateTime startDate);
 
     @Query("SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t " +
             "WHERE t.account.id = :accountId AND t.transactionType = :type")
-
     BigDecimal sumByAccountIdAndType(
             @Param("accountId") Long accountId,
             @Param("type") Transaction.TransactionType type);
-
 }
