@@ -56,7 +56,17 @@ public class TransactionService {
                 .transactionDate(request.getTransactionDate())
                 .build();
 
-        return toResponse(transactionRepository.save(transaction));
+        transactionRepository.save(transaction);
+
+        // INCOME → balance naik, EXPENSE → balance turun
+        if (request.getTransactionType().equals("INCOME")) {
+            account.setBalance(account.getBalance().add(request.getAmount()));
+        } else {
+            account.setBalance(account.getBalance().subtract(request.getAmount()));
+        }
+        accountRepository.save(account);
+
+        return toResponse(transaction);
     }
 
     public List<TransactionResponse> getAll(String username, Long accountId) {
@@ -79,6 +89,20 @@ public class TransactionService {
         Transaction transaction = transactionRepository.findByIdAndAccount(id, account)
                 .orElseThrow(() -> new RuntimeException("Transaction not found"));
 
+        // Balik dulu efek transaksi lama ke balance
+        if (transaction.getTransactionType().equals("INCOME")) {
+            account.setBalance(account.getBalance().subtract(transaction.getAmount()));
+        } else {
+            account.setBalance(account.getBalance().add(transaction.getAmount()));
+        }
+
+        // Terapkan efek transaksi baru ke balance
+        if (request.getTransactionType().equals("INCOME")) {
+            account.setBalance(account.getBalance().add(request.getAmount()));
+        } else {
+            account.setBalance(account.getBalance().subtract(request.getAmount()));
+        }
+
         transaction.setDescription(request.getDescription());
         transaction.setAmount(request.getAmount());
         transaction.setTransactionType(request.getTransactionType());
@@ -87,6 +111,7 @@ public class TransactionService {
             transaction.setTransactionDate(request.getTransactionDate());
         }
 
+        accountRepository.save(account);
         return toResponse(transactionRepository.save(transaction));
     }
 
@@ -94,6 +119,16 @@ public class TransactionService {
         Account account = getAccount(username, accountId);
         Transaction transaction = transactionRepository.findByIdAndAccount(id, account)
                 .orElseThrow(() -> new RuntimeException("Transaction not found"));
+
+        // Kembalikan balance sebelum hapus
+        // Kebalikan dari create: INCOME dihapus → balance turun, EXPENSE dihapus → balance naik
+        if (transaction.getTransactionType().equals("INCOME")) {
+            account.setBalance(account.getBalance().subtract(transaction.getAmount()));
+        } else {
+            account.setBalance(account.getBalance().add(transaction.getAmount()));
+        }
+        accountRepository.save(account);
+
         transactionRepository.delete(transaction);
     }
 }
