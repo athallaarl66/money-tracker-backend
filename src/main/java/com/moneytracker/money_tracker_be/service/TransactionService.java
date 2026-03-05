@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 
 @Service
@@ -22,13 +23,21 @@ public class TransactionService {
     private final AccountRepository accountRepository;
     private final UserRepository userRepository;
 
+    // ─── Private helpers ──────────────────────────────────────────────────────
+
     private Account getAccountOrThrow(String email, Long accountId) {
         return accountRepository.findById(accountId)
                 .filter(a -> a.getUser().getEmail().equals(email))
                 .orElseThrow(() -> new RuntimeException("Account not found or unauthorized"));
     }
 
-    // Pakai .builder() karena TransactionResponse pakai @Builder (bukan @NoArgsConstructor)
+    private Long getUserIdOrThrow(String email) {
+        return userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found"))
+                .getId();
+    }
+
+    // Pakai .builder() karena TransactionResponse pakai @Builder
     private TransactionResponse toResponse(Transaction t) {
         return TransactionResponse.builder()
                 .id(t.getId())
@@ -52,7 +61,7 @@ public class TransactionService {
         }
     }
 
-    // Balik efek ke balance (kebalikan dari applyBalance)
+    // Balik efek ke balance — dipake waktu update/delete
     private void reverseBalance(Account account, TransactionType type, BigDecimal amount) {
         if (type == TransactionType.INCOME) {
             account.setBalance(account.getBalance().subtract(amount));
@@ -61,7 +70,18 @@ public class TransactionService {
         }
     }
 
-    // CREATE
+    // Escape value CSV — cegah CSV injection & handle koma/newline di description
+    private String escapeCsv(String value) {
+        if (value == null) return "";
+        // Kalau ada koma, quote, atau newline → wrap dalam double quote
+        if (value.contains(",") || value.contains("\"") || value.contains("\n")) {
+            return "\"" + value.replace("\"", "\"\"") + "\"";
+        }
+        return value;
+    }
+
+    // ─── CRUD ─────────────────────────────────────────────────────────────────
+
     public TransactionResponse create(String email, Long accountId, TransactionRequest request) {
         Account account = getAccountOrThrow(email, accountId);
 
@@ -79,18 +99,14 @@ public class TransactionService {
         return toResponse(transactionRepository.save(transaction));
     }
 
-    // GET ALL per account
     public List<TransactionResponse> getAll(String email, Long accountId) {
         getAccountOrThrow(email, accountId);
         return transactionRepository.findByAccountId(accountId)
                 .stream().map(this::toResponse).toList();
     }
 
-    // GET ALL lintas semua account milik user — endpoint baru GET /api/transactions
     public List<TransactionResponse> getAllByUser(String email) {
-        Long userId = userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("User not found"))
-                .getId();
+        Long userId = getUserIdOrThrow(email);
 
         return transactionRepository.findByAccountUserId(userId)
                 .stream()
@@ -99,7 +115,6 @@ public class TransactionService {
                 .toList();
     }
 
-    // GET BY ID
     public TransactionResponse getById(String email, Long accountId, Long id) {
         getAccountOrThrow(email, accountId);
         Transaction t = transactionRepository.findById(id)
@@ -107,7 +122,6 @@ public class TransactionService {
         return toResponse(t);
     }
 
-    // UPDATE
     public TransactionResponse update(String email, Long accountId, Long id, TransactionRequest request) {
         Account account = getAccountOrThrow(email, accountId);
         Transaction transaction = transactionRepository.findById(id)
@@ -126,7 +140,6 @@ public class TransactionService {
         return toResponse(transactionRepository.save(transaction));
     }
 
-    // DELETE
     public void delete(String email, Long accountId, Long id) {
         Account account = getAccountOrThrow(email, accountId);
         Transaction transaction = transactionRepository.findById(id)
@@ -135,5 +148,47 @@ public class TransactionService {
         reverseBalance(account, transaction.getTransactionType(), transaction.getAmount());
         accountRepository.save(account);
         transactionRepository.delete(transaction);
+    }
+
+    // ─── Export CSV ───────────────────────────────────────────────────────────
+
+    /**
+     * Generate CSV string dari transaksi user.
+     * Filter opsional by year & month — kalau null, export semua.
+     *
+     * Format: Date,Type,Category,Description,Account,Amount
+     */
+    public String exportCsv(String email, Integer year, Integer month) {
+        Long userId = getUserIdOrThrow(email);
+
+        List<Transaction> transactions = transactionRepository
+                .findByAccountUserId(userId)
+                .stream()
+                .sorted((a, b) -> b.getTransactionDate().compareTo(a.getTransactionDate()))
+                .filter(t -> {
+                    // Kalau year/month ga di-provide, ambil semua
+                    if (year == null || month == null) return true;
+                    LocalDate date = t.getTransactionDate().toLocalDate();
+                    return date.getYear() == year && date.getMonthValue() == month;
+                })
+                .toList();
+
+        StringBuilder csv = new StringBuilder();
+
+        // Header row
+        csv.append("Date,Type,Category,Description,Account,Amount\n");
+
+        // Data rows
+        for (Transaction t : transactions) {
+            csv.append(t.getTransactionDate()).append(",");
+            csv.append(t.getTransactionType().name()).append(",");
+            csv.append(escapeCsv(t.getCategory())).append(",");
+            csv.append(escapeCsv(t.getDescription())).append(",");
+            csv.append(escapeCsv(t.getAccount().getName())).append(",");
+            // Amount selalu positif di CSV — type sudah ada di kolom Type
+            csv.append(t.getAmount().toPlainString()).append("\n");
+        }
+
+        return csv.toString();
     }
 }
