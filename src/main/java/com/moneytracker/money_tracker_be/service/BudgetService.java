@@ -13,7 +13,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.List;
 
@@ -25,8 +25,6 @@ public class BudgetService {
     private final TransactionRepository transactionRepository;
     private final UserRepository userRepository;
 
-    // ─── Private helpers ──────────────────────────────────────────────────────
-
     private User getUserOrThrow(String email) {
         return userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("User not found"));
@@ -35,32 +33,24 @@ public class BudgetService {
     private Budget getBudgetOrThrow(String email, Long budgetId) {
         Budget budget = budgetRepository.findById(budgetId)
                 .orElseThrow(() -> new RuntimeException("Budget not found"));
-
-        // Pastikan budget ini milik user yang request — cegah akses data orang lain
         if (!budget.getUser().getEmail().equals(email)) {
             throw new RuntimeException("Budget not found or unauthorized");
         }
         return budget;
     }
 
-    /**
-     * Hitung total expense user di kategori tertentu dalam bulan tertentu.
-     * Ini yang bikin progress bar akurat di FE.
-     */
     private BigDecimal calculateSpent(Long userId, String category, String budgetMonth) {
         YearMonth ym = YearMonth.parse(budgetMonth);
-
-        // Rentang tanggal awal dan akhir bulan
-        LocalDateTime startOfMonth = ym.atDay(1).atStartOfDay();
-        LocalDateTime endOfMonth = ym.atEndOfMonth().atTime(23, 59, 59);
+        LocalDate startOfMonth = ym.atDay(1);
+        LocalDate endOfMonth = ym.atEndOfMonth();
 
         return transactionRepository.findByAccountUserId(userId)
                 .stream()
                 .filter(t -> t.getTransactionType() == TransactionType.EXPENSE)
                 .filter(t -> t.getCategory() != null && t.getCategory().equalsIgnoreCase(category))
                 .filter(t -> {
-                    LocalDateTime date = t.getTransactionDate();
-                    return !date.isBefore(startOfMonth) && !date.isAfter(endOfMonth);
+                    LocalDate date = t.getTransactionDate();
+                    return date != null && !date.isBefore(startOfMonth) && !date.isAfter(endOfMonth);
                 })
                 .map(t -> t.getAmount())
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -71,7 +61,6 @@ public class BudgetService {
         BigDecimal limit = budget.getLimitAmount();
         BigDecimal remaining = limit.subtract(spent);
 
-        // Hitung persentase — pakai scale 2 biar presisi
         double percentage = 0.0;
         if (limit.compareTo(BigDecimal.ZERO) > 0) {
             percentage = spent.divide(limit, 4, RoundingMode.HALF_UP)
@@ -84,29 +73,23 @@ public class BudgetService {
                 .category(budget.getCategory())
                 .limitAmount(limit)
                 .spentAmount(spent)
-                .percentage(Math.round(percentage * 10.0) / 10.0) // 1 desimal cukup
+                .percentage(Math.round(percentage * 10.0) / 10.0)
                 .remainingAmount(remaining)
                 .budgetMonth(budget.getBudgetMonth())
                 .build();
     }
 
-    // ─── CRUD ─────────────────────────────────────────────────────────────────
-
     public BudgetResponse create(String email, BudgetRequest request) {
         User user = getUserOrThrow(email);
 
-        // Cek duplikat — satu kategori per bulan per user
         boolean alreadyExists = budgetRepository
                 .findByUserIdAndCategoryAndBudgetMonth(
-                        user.getId(),
-                        request.getCategory(),
-                        request.getBudgetMonth()
-                ).isPresent();
+                        user.getId(), request.getCategory(), request.getBudgetMonth())
+                .isPresent();
 
         if (alreadyExists) {
             throw new RuntimeException(
-                    "Budget untuk kategori '" + request.getCategory() + "' di bulan ini sudah ada"
-            );
+                    "Budget for category '" + request.getCategory() + "' already exists this month");
         }
 
         Budget budget = Budget.builder()
@@ -132,7 +115,6 @@ public class BudgetService {
         User user = getUserOrThrow(email);
         Budget budget = getBudgetOrThrow(email, budgetId);
 
-        // Kalau ganti kategori atau bulan, cek duplikat lagi
         boolean categoryOrMonthChanged =
                 !budget.getCategory().equals(request.getCategory()) ||
                         !budget.getBudgetMonth().equals(request.getBudgetMonth());
@@ -140,17 +122,13 @@ public class BudgetService {
         if (categoryOrMonthChanged) {
             boolean conflict = budgetRepository
                     .findByUserIdAndCategoryAndBudgetMonth(
-                            user.getId(),
-                            request.getCategory(),
-                            request.getBudgetMonth()
-                    )
+                            user.getId(), request.getCategory(), request.getBudgetMonth())
                     .filter(existing -> !existing.getId().equals(budgetId))
                     .isPresent();
 
             if (conflict) {
                 throw new RuntimeException(
-                        "Budget untuk kategori '" + request.getCategory() + "' di bulan ini sudah ada"
-                );
+                        "Budget for category '" + request.getCategory() + "' already exists this month");
             }
         }
 

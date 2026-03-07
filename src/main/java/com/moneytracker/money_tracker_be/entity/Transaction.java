@@ -3,6 +3,7 @@ package com.moneytracker.money_tracker_be.entity;
 import jakarta.persistence.*;
 import lombok.*;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
@@ -34,7 +35,7 @@ public class Transaction {
     private String category;
 
     @Column(name = "transaction_date")
-    private LocalDateTime transactionDate;
+    private LocalDate transactionDate;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
@@ -42,7 +43,7 @@ public class Transaction {
     @PrePersist
     public void prePersist() {
         this.createdAt = LocalDateTime.now();
-        if (this.transactionDate == null) this.transactionDate = LocalDateTime.now();
+        if (this.transactionDate == null) this.transactionDate = LocalDate.now();
     }
 
     public enum TransactionType {

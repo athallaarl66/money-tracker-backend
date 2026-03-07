@@ -4,6 +4,7 @@ import com.moneytracker.money_tracker_be.entity.Transaction.TransactionType;
 import lombok.Builder;
 import lombok.Data;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Data
@@ -16,6 +17,6 @@ public class TransactionResponse {
     private BigDecimal amount;
     private TransactionType transactionType;
     private String category;
-    private LocalDateTime transactionDate;
+    private LocalDate transactionDate;
     private LocalDateTime createdAt;
 }

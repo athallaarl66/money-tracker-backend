@@ -9,7 +9,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -47,8 +47,8 @@ public class AnalyticsService {
 
     private SummaryResponse getSummaryByMonth(Long userId, int year, int month) {
         YearMonth ym = YearMonth.of(year, month);
-        LocalDateTime start = ym.atDay(1).atStartOfDay();
-        LocalDateTime end = ym.atEndOfMonth().atTime(23, 59, 59);
+        LocalDate start = ym.atDay(1);
+        LocalDate end = ym.atEndOfMonth();
 
         BigDecimal totalIncome = transactionRepository
                 .sumByUserIdAndTypeAndDateRange(userId, Transaction.TransactionType.INCOME, start, end);
@@ -73,15 +73,14 @@ public class AnalyticsService {
 
         if (year != null && month != null) {
             YearMonth ym = YearMonth.of(year, month);
-            LocalDateTime start = ym.atDay(1).atStartOfDay();
-            LocalDateTime end = ym.atEndOfMonth().atTime(23, 59, 59);
+            LocalDate start = ym.atDay(1);
+            LocalDate end = ym.atEndOfMonth();
             rawData = transactionRepository
                     .findExpenseByCategoryAndDateRange(userId, start, end);
         } else {
             rawData = transactionRepository.findExpenseByCategory(userId);
         }
 
-        // Hitung grand total untuk persentase
         BigDecimal grandTotal = rawData.stream()
                 .map(row -> (BigDecimal) row[1])
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -107,10 +106,9 @@ public class AnalyticsService {
     // 3. MONTHLY TREND
     // ================================================================
     public List<MonthlyTrendResponse> getMonthlyTrend(Long userId, int months) {
-        LocalDateTime startDate = LocalDateTime.now()
+        LocalDate startDate = LocalDate.now()
                 .minusMonths(months)
-                .withDayOfMonth(1)
-                .withHour(0).withMinute(0).withSecond(0).withNano(0);
+                .withDayOfMonth(1);
 
         List<Object[]> rawData = transactionRepository
                 .findMonthlyTrend(userId, startDate);

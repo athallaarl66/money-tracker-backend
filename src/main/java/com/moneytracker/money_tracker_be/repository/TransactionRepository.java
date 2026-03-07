@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -15,15 +16,12 @@ import java.util.Optional;
 @Repository
 public interface TransactionRepository extends JpaRepository<Transaction, Long> {
 
-    // ===== EXISTING =====
     List<Transaction> findByAccount(Account account);
     Optional<Transaction> findByIdAndAccount(Long id, Account account);
-
-    // ===== NEW — dipakai TransactionService =====
     List<Transaction> findByAccountId(Long accountId);
-    List<Transaction> findByAccountUserId(Long userId); // get all transaksi lintas account
+    List<Transaction> findByAccountUserId(Long userId);
 
-    // ===== ANALYTICS =====
+    // ── Analytics ──
 
     @Query("SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t " +
             "WHERE t.account.user.id = :userId AND t.transactionType = :type")
@@ -37,8 +35,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     BigDecimal sumByUserIdAndTypeAndDateRange(
             @Param("userId") Long userId,
             @Param("type") Transaction.TransactionType type,
-            @Param("startDate") LocalDateTime startDate,
-            @Param("endDate") LocalDateTime endDate);
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
 
     @Query("SELECT t.category, SUM(t.amount), COUNT(t) FROM Transaction t " +
             "WHERE t.account.user.id = :userId " +
@@ -53,8 +51,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             "GROUP BY t.category ORDER BY SUM(t.amount) DESC")
     List<Object[]> findExpenseByCategoryAndDateRange(
             @Param("userId") Long userId,
-            @Param("startDate") LocalDateTime startDate,
-            @Param("endDate") LocalDateTime endDate);
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate);
 
     @Query(value =
             "SELECT TO_CHAR(t.transaction_date, 'YYYY-MM') as month, " +
@@ -69,7 +67,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             nativeQuery = true)
     List<Object[]> findMonthlyTrend(
             @Param("userId") Long userId,
-            @Param("startDate") LocalDateTime startDate);
+            @Param("startDate") LocalDate startDate);
 
     @Query("SELECT COALESCE(SUM(t.amount), 0) FROM Transaction t " +
             "WHERE t.account.id = :accountId AND t.transactionType = :type")

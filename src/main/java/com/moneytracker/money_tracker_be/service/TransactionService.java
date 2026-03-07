@@ -23,8 +23,6 @@ public class TransactionService {
     private final AccountRepository accountRepository;
     private final UserRepository userRepository;
 
-    // ─── Private helpers ──────────────────────────────────────────────────────
-
     private Account getAccountOrThrow(String email, Long accountId) {
         return accountRepository.findById(accountId)
                 .filter(a -> a.getUser().getEmail().equals(email))
@@ -37,7 +35,6 @@ public class TransactionService {
                 .getId();
     }
 
-    // Pakai .builder() karena TransactionResponse pakai @Builder
     private TransactionResponse toResponse(Transaction t) {
         return TransactionResponse.builder()
                 .id(t.getId())
@@ -52,7 +49,6 @@ public class TransactionService {
                 .build();
     }
 
-    // Tambah efek ke balance (income = add, expense = subtract)
     private void applyBalance(Account account, TransactionType type, BigDecimal amount) {
         if (type == TransactionType.INCOME) {
             account.setBalance(account.getBalance().add(amount));
@@ -61,7 +57,6 @@ public class TransactionService {
         }
     }
 
-    // Balik efek ke balance — dipake waktu update/delete
     private void reverseBalance(Account account, TransactionType type, BigDecimal amount) {
         if (type == TransactionType.INCOME) {
             account.setBalance(account.getBalance().subtract(amount));
@@ -70,17 +65,13 @@ public class TransactionService {
         }
     }
 
-    // Escape value CSV — cegah CSV injection & handle koma/newline di description
     private String escapeCsv(String value) {
         if (value == null) return "";
-        // Kalau ada koma, quote, atau newline → wrap dalam double quote
         if (value.contains(",") || value.contains("\"") || value.contains("\n")) {
             return "\"" + value.replace("\"", "\"\"") + "\"";
         }
         return value;
     }
-
-    // ─── CRUD ─────────────────────────────────────────────────────────────────
 
     public TransactionResponse create(String email, Long accountId, TransactionRequest request) {
         Account account = getAccountOrThrow(email, accountId);
@@ -107,7 +98,6 @@ public class TransactionService {
 
     public List<TransactionResponse> getAllByUser(String email) {
         Long userId = getUserIdOrThrow(email);
-
         return transactionRepository.findByAccountUserId(userId)
                 .stream()
                 .sorted((a, b) -> b.getTransactionDate().compareTo(a.getTransactionDate()))
@@ -150,14 +140,6 @@ public class TransactionService {
         transactionRepository.delete(transaction);
     }
 
-    // ─── Export CSV ───────────────────────────────────────────────────────────
-
-    /**
-     * Generate CSV string dari transaksi user.
-     * Filter opsional by year & month — kalau null, export semua.
-     *
-     * Format: Date,Type,Category,Description,Account,Amount
-     */
     public String exportCsv(String email, Integer year, Integer month) {
         Long userId = getUserIdOrThrow(email);
 
@@ -166,26 +148,21 @@ public class TransactionService {
                 .stream()
                 .sorted((a, b) -> b.getTransactionDate().compareTo(a.getTransactionDate()))
                 .filter(t -> {
-                    // Kalau year/month ga di-provide, ambil semua
                     if (year == null || month == null) return true;
-                    LocalDate date = t.getTransactionDate().toLocalDate();
+                    LocalDate date = t.getTransactionDate();
                     return date.getYear() == year && date.getMonthValue() == month;
                 })
                 .toList();
 
         StringBuilder csv = new StringBuilder();
-
-        // Header row
         csv.append("Date,Type,Category,Description,Account,Amount\n");
 
-        // Data rows
         for (Transaction t : transactions) {
             csv.append(t.getTransactionDate()).append(",");
             csv.append(t.getTransactionType().name()).append(",");
             csv.append(escapeCsv(t.getCategory())).append(",");
             csv.append(escapeCsv(t.getDescription())).append(",");
             csv.append(escapeCsv(t.getAccount().getName())).append(",");
-            // Amount selalu positif di CSV — type sudah ada di kolom Type
             csv.append(t.getAmount().toPlainString()).append("\n");
         }
 
