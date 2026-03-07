@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: money-tracker-be
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+
+    # Environment variables — isi value-nya di Render dashboard
+    envVars:
+      - key: SPRING_DATASOURCE_URL
+        sync: false
+      - key: SPRING_DATASOURCE_USERNAME
+        sync: false
+      - key: SPRING_DATASOURCE_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+
+    healthCheckPath: /api/health
